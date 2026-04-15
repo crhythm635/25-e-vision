@@ -52,6 +52,8 @@ GAUSSIAN_BLUR_SIZE = 5
 # 面积阈值
 AREA_MINI_THRESHOLD = 2000
 AREA_MAX_THRESHOLD = 50000
+A4_LANDSCAPE_RATIO = 297 / 210
+A4_RATIO_TOLERANCE = 0.35
 # 最小边长
 SIDE_MIN_LENGTH = 30
 # 对边最大差值
@@ -147,6 +149,20 @@ def find_max_rect(rects):
             best_rect = rect
     return best_rect
 
+def find_max_valid_rect(rects):
+    best_info = None
+    best_area = 0
+
+    for rect in rects:
+        info = analyze_rect(rect)
+        if not info["valid"]:
+            continue
+        if info["area"] > best_area:
+            best_area = info["area"]
+            best_info = info
+
+    return best_info
+
 def draw_rect_outline(img, corners, color):
     for i in range(4):
         x1, y1 = corners[i]
@@ -171,6 +187,13 @@ def analyze_rect(rect):
     #对边长
     err1 = abs(len1 - len2)
     err2 = abs(len3 - len4)
+
+    width_avg = (len1 + len2) * 0.5
+    height_avg = (len3 + len4) * 0.5
+    if height_avg > 1e-6:
+        ratio = width_avg / height_avg
+    else:
+        ratio = 0.0
 
     # 角度
     theta1 = angle_deg(corners[0], corners[1])
@@ -198,8 +221,13 @@ def analyze_rect(rect):
 
     vertical_allow = are_segments_vertical(theta1, theta3, ANGLE_TOLERANCE) and \
                      are_segments_vertical(theta2, theta4, ANGLE_TOLERANCE)
+
+    ratio_allow = (
+        width_avg > height_avg and
+        abs(ratio - A4_LANDSCAPE_RATIO) <= A4_RATIO_TOLERANCE
+    )
     
-    valid = area_allow and length_allow and shape_allow and parallel_allow and vertical_allow
+    valid = area_allow and length_allow and shape_allow and parallel_allow and vertical_allow and ratio_allow
     
     return {
         "corners": corners,
@@ -208,8 +236,12 @@ def analyze_rect(rect):
         "len2": len2,
         "len3": len3,
         "len4": len4,
+        "width_avg": width_avg,
+        "height_avg": height_avg,
+        "ratio": ratio,
         "err1": err1,
         "err2": err2,
+        "ratio_allow": ratio_allow,
         "valid": valid,
     }
 
@@ -282,21 +314,22 @@ def capture_picture():
 
             )
 
-            best = find_max_rect(rects)
+            best_preview = find_max_rect(rects)
+            best_valid_info = find_max_valid_rect(rects)
 
-            if best is not None:
-                info = analyze_rect(best)
-                candidate_corners = info["corners"]
-                best_area = info["area"]
-                err1 = info["err1"]
-                err2 = info["err2"]
+            if best_preview is not None:
+                preview_info = analyze_rect(best_preview)
+                candidate_corners = preview_info["corners"]
 
                 #建议先画成红色 避免闪烁
                 draw_rect_outline(img, candidate_corners, BAD_COLOR)
 
-                if info["valid"]:
-                    rect_flag = 1
-                    last_valid_corners = candidate_corners
+            if best_valid_info is not None:
+                rect_flag = 1
+                best_area = best_valid_info["area"]
+                err1 = best_valid_info["err1"]
+                err2 = best_valid_info["err2"]
+                last_valid_corners = best_valid_info["corners"]
 
             if rect_flag == 1 and last_valid_corners is not None:
                 draw_rect_outline(img, last_valid_corners, GOOD_COLOR)               
