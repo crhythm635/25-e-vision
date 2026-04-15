@@ -134,53 +134,13 @@ def find_intersection(x1, y1, x2, y2, x3, y3, x4, y4):
 
     return (x1 + t * ab[0], y1 + t * ab[1])
 
-def calculate_center(points):
-    # 计算一组点的平均中心。
-    # 后面排序角点时，需要先知道四个点的中心位置。
-    if not points:
-        return (0.0, 0.0)
-
-    sum_x = 0.0
-    sum_y = 0.0
-    for x, y in points:
-        sum_x += x
-        sum_y += y
-
-    count = len(points)
-    return (sum_x / count, sum_y / count)
-
-def sort_corners(corners):
-    # 把四个角点统一成稳定顺序。
-    # 思路是：
-    # 1. 先求四点中心
-    # 2. 按点相对中心的极角排序，得到环绕顺序
-    # 3. 再把左上角旋转到第一个点
-    #
-    # 这样后面就尽量能固定成：
-    # 0 左上，1 右上，2 右下，3 左下
-    center = calculate_center(corners)
-    ordered = sorted(
-        corners,
-        key=lambda p: math.atan2(p[1] - center[1], p[0] - center[0])
-    )
-
-    left_top = min(ordered, key=lambda p: p[0] + p[1])
-    start_index = ordered.index(left_top)
-    return ordered[start_index:] + ordered[:start_index]
-
 def rect_to_corners(rect):
-    corners = [
+    return [
         (int(rect[4]), int(rect[5])),
         (int(rect[6]), int(rect[7])),
         (int(rect[8]), int(rect[9])),
         (int(rect[10]), int(rect[11])),
     ]
-    # 先对角点排序，再交给后面的边长和角度判断使用。
-    # 这样可以减少不同帧返回顺序跳变导致的误判。
-    return sort_corners(corners)
-    # 先对角点排序，再交给后面的边长和角度判断使用，
-    # 避免不同帧返回顺序跳变导致误判。
-    return sort_corners(corners)
 
 def find_max_rect(rects):
     max_area = 0
@@ -191,17 +151,6 @@ def find_max_rect(rects):
             max_area = area
             best_rect = rect
     return best_rect
-
-def rect_to_corners_sorted(rect):
-    # 这是一个干净版本的“取角点并排序”函数。
-    # 之所以单独写出来，是为了避免旧函数里的乱码注释影响阅读。
-    corners = [
-        (int(rect[4]), int(rect[5])),
-        (int(rect[6]), int(rect[7])),
-        (int(rect[8]), int(rect[9])),
-        (int(rect[10]), int(rect[11])),
-    ]
-    return sort_corners(corners)
 
 def find_max_valid_rect(rects):
     best_info = None
@@ -227,7 +176,7 @@ def draw_rect_outline(img, corners, color):
 # 筛选矩形：面积 边长 平行垂直
 def analyze_rect(rect):
 
-    corners = rect_to_corners_sorted(rect)
+    corners = rect_to_corners(rect)
 
     # 计算边长
     len1 = distance(corners[0], corners[1])
@@ -238,7 +187,7 @@ def analyze_rect(rect):
     # 面积
     area = rect[2] * rect[3]
 
-    #对边长
+    #对边差
     err1 = abs(len1 - len2)
     err2 = abs(len3 - len4)
 
@@ -298,16 +247,6 @@ def analyze_rect(rect):
         "ratio_allow": ratio_allow,
         "valid": valid,
     }
-
-def draw_rect_outline_labeled(img, corners, color):
-    # 画矩形边框，并把四个角点编号显示出来。
-    # 这样你可以直接观察排序后的 0/1/2/3 是否稳定。
-    for i in range(4):
-        x1, y1 = corners[i]
-        x2, y2 = corners[(i + 1) % 4]
-        img.draw_line(int(x1), int(y1), int(x2), int(y2), color=color, thickness=3)
-        img.draw_circle(int(x1), int(y1), 2, color=POINT_COLOR, thickness=-1)
-        img.draw_string_advanced(int(x1) + 4, int(y1) + 4, 18, str(i), color=color)
 
 
 #------
@@ -381,17 +320,12 @@ def capture_picture():
             best_preview = find_max_rect(rects)
             best_valid_info = find_max_valid_rect(rects)
 
-            if best_preview is not None:
-                preview_info = analyze_rect(best_preview)
-                candidate_corners = preview_info["corners"]
-                draw_rect_outline_labeled(img, candidate_corners, BAD_COLOR)
-                # 把最大候选框画成红色，并把角点编号显示出来，
-                # 用来观察排序后的 0/1/2/3 是否稳定。
-                draw_rect_outline_labeled(img, candidate_corners, BAD_COLOR)
+            # if best_preview is not None:
+            #     preview_info = analyze_rect(best_preview)
+            #     candidate_corners = preview_info["corners"]
 
             #     #建议先画成红色 避免闪烁
-                # 先把“最大候选框”画成红色，并显示角点编号。
-                draw_rect_outline_labeled(img, candidate_corners, BAD_COLOR)
+            #     draw_rect_outline(img, candidate_corners, BAD_COLOR)
 
             if best_valid_info is not None:
                 rect_flag = 1
@@ -401,7 +335,7 @@ def capture_picture():
                 last_valid_corners = best_valid_info["corners"]
 
             if rect_flag == 1 and last_valid_corners is not None:
-                draw_rect_outline_labeled(img, last_valid_corners, GOOD_COLOR)               
+                draw_rect_outline(img, last_valid_corners, GOOD_COLOR)               
                 center = find_intersection(
                     last_valid_corners[0][0], last_valid_corners[0][1],
                     last_valid_corners[2][0], last_valid_corners[2][1],
