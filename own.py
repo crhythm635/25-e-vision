@@ -70,6 +70,7 @@ GOOD_COLOR = (0, 255, 0)
 BAD_COLOR = (255, 0, 0)
 POINT_COLOR = (0, 0, 255)
 DEBUG_PRINT_INTERVAL = 10
+VALID_HOLD_FRAMES = 3
 
 #全局变量
 sensor = None
@@ -353,6 +354,7 @@ def capture_picture():
 
     fps = time.clock()
     frame_count = 0
+    lost_valid_frames = 0
 
     while True:
         fps.tick()
@@ -418,6 +420,7 @@ def capture_picture():
                 err2 = best_valid_info["err2"]
                 # 把这次有效矩形的角点存下来，后面画绿框和算中心都用它。
                 last_valid_corners = best_valid_info["corners"]
+                lost_valid_frames = 0
 
                 if frame_count % DEBUG_PRINT_INTERVAL == 0:
                     print(
@@ -431,7 +434,17 @@ def capture_picture():
                         )
                     )
 
-            if rect_flag == 1 and last_valid_corners is not None:
+            elif last_valid_corners is not None and lost_valid_frames < VALID_HOLD_FRAMES:
+                rect_flag = 2
+                lost_valid_frames += 1
+
+                if frame_count % DEBUG_PRINT_INTERVAL == 0:
+                    print("hold last valid, miss=%d" % lost_valid_frames)
+            else:
+                last_valid_corners = None
+                lost_valid_frames = 0
+
+            if rect_flag != 0 and last_valid_corners is not None:
                 draw_rect_outline(img, last_valid_corners, GOOD_COLOR)               
                 center = find_intersection(
                     last_valid_corners[0][0], last_valid_corners[0][1],
