@@ -13,12 +13,12 @@ import cv_lite
 #------------
 
 fpioa = FPIOA()
-fpioa.set_function(3, FPIOA.UART1_TXD)
-fpioa.set_function(4, FPIOA.UART1_RXD)
+fpioa.set_function(11, FPIOA.UART2_TXD)
+fpioa.set_function(12, FPIOA.UART2_RXD)
 
 uart = UART(
 
-    UART.UART1,
+    UART.UART2,
     baudrate = 115200,
     bits = UART.EIGHTBITS,
     parity = UART.PARITY_NONE,
@@ -86,12 +86,12 @@ def format_coord(coord):
 
 #串口发送
 def send_offset(x, y):
-    payload = "[" + format_coord(x) + format_coord(y) + "*]"
+    payload = "[" + format_coord(x) + format_coord(y) + "*]\r\n"
     uart.write(payload)
 
 #失去目标
 def send_lost():
-    uart.write("[LOST*]")
+    uart.write("[LOST*]\r\n")
 
 #欧式距离
 def distance(p1, p2):
@@ -339,10 +339,16 @@ def camera_deinit():
     if sensor is not None:
         sensor.stop()
 
+    try:
+        uart.deinit()
+    except:
+        pass
+
     Display.deinit()
     os.exitpoint(os.EXITPOINT_ENABLE_SLEEP)
     time.sleep_ms(100)
     MediaManager.deinit()
+
 
 
 #------
