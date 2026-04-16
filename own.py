@@ -69,6 +69,7 @@ TEXT_COLOR = (255, 255, 0)
 GOOD_COLOR = (0, 255, 0)
 BAD_COLOR = (255, 0, 0)
 POINT_COLOR = (0, 0, 255)
+DEBUG_PRINT_INTERVAL = 10
 
 #全局变量
 sensor = None
@@ -134,13 +135,73 @@ def find_intersection(x1, y1, x2, y2, x3, y3, x4, y4):
 
     return (x1 + t * ab[0], y1 + t * ab[1])
 
-def rect_to_corners(rect):
+def extract_raw_corners(rect):
+    # 直接从 cv_lite 返回的矩形数组里取出 4 个角点。
+    # 这里先不做任何排序，只保留“原始顺序”，方便后面和排序结果对比。
     return [
+        # 第 1 个角点：(x0, y0)
         (int(rect[4]), int(rect[5])),
+        # 第 2 个角点：(x1, y1)
         (int(rect[6]), int(rect[7])),
+        # 第 3 个角点：(x2, y2)
         (int(rect[8]), int(rect[9])),
+        # 第 4 个角点：(x3, y3)
         (int(rect[10]), int(rect[11])),
     ]
+
+def calculate_center(points):
+    # 如果传进来的点列表为空，就返回原点，避免下面除以 0。
+    if not points:
+        return (0.0, 0.0)
+
+    # 分别累计所有点的 x 和 y。
+    sum_x = 0.0
+    sum_y = 0.0
+
+    # 逐个点累加。
+    for x, y in points:
+        sum_x += x
+        sum_y += y
+
+    # 点的数量，用来求平均值。
+    count = len(points)
+    # 所有点的平均值，就是这组点的几何中心。
+    return (sum_x / count, sum_y / count)
+
+def sort_corners(corners):
+    # 理论上矩形应该恰好有 4 个角点。
+    # 如果不是 4 个，说明数据异常，直接原样返回，避免强行排序出错。
+    if len(corners) != 4:
+        return corners
+
+    # 先求 4 个角点的中心，后面要用这个中心做极角排序。
+    center = calculate_center(corners)
+    # 以中心为参考，计算每个点相对中心的角度。
+    # sorted 之后，4 个点就会按“绕中心转一圈”的顺序排好。
+    ordered = sorted(
+        corners,
+        key=lambda p: math.atan2(p[1] - center[1], p[0] - center[0])
+    )
+
+    # 上一步只是保证“绕一圈”的顺序一致，
+    # 但列表的起点可能还是会变，比如这一帧从左上开始，下一帧从右上开始。
+    # 所以这里再额外找一个固定起点。
+    # 左上角通常满足 x+y 最小，所以把它当成索引 0。
+    start_index = min(range(4), key=lambda i: ordered[i][0] + ordered[i][1])
+    # 把列表旋转一下，让左上角永远排在第一个。
+    # 这样后面用 corners[0]、corners[1] 之类时才稳定。
+    return ordered[start_index:] + ordered[:start_index]
+
+def rect_to_corners(rect):
+    # 先取原始角点。
+    raw_corners = extract_raw_corners(rect)
+    # 再返回排好序的角点，供后面的几何计算直接使用。
+    return sort_corners(raw_corners)
+
+def format_corners_for_print(corners):
+    # 把角点列表格式化成适合 IDE 里看的字符串。
+    # 例如 [(10,20), (30,40), ...]
+    return "[" + ", ".join("(%d,%d)" % (p[0], p[1]) for p in corners) + "]"
 
 def find_max_rect(rects):
     max_area = 0
@@ -176,7 +237,11 @@ def draw_rect_outline(img, corners, color):
 # 筛选矩形：面积 边长 平行垂直
 def analyze_rect(rect):
 
-    corners = rect_to_corners(rect)
+    # 先取出 cv_lite 给的“原始角点顺序”。
+    # 这个值主要用于调试，看库函数原本返回的顺序是不是乱的。
+    raw_corners = extract_raw_corners(rect)
+    # 再把角点排序，后面的边长、角度、长宽比都基于“稳定顺序”来算。
+    corners = sort_corners(raw_corners)
 
     # 计算边长
     len1 = distance(corners[0], corners[1])
@@ -233,6 +298,9 @@ def analyze_rect(rect):
     valid = area_allow and length_allow and shape_allow and parallel_allow and vertical_allow and ratio_allow
     
     return {
+        # 原始角点顺序，主要给 IDE 打印调试用。
+        "raw_corners": raw_corners,
+        # 排序后的角点顺序，后续绘图和筛选都用这个。
         "corners": corners,
         "area": int(area),
         "len1": len1,
@@ -320,19 +388,48 @@ def capture_picture():
             best_preview = find_max_rect(rects)
             best_valid_info = find_max_valid_rect(rects)
 
-            # if best_preview is not None:
-            #     preview_info = analyze_rect(best_preview)
-            #     candidate_corners = preview_info["corners"]
+            if best_preview is not None:
+                # 先分析“最大的候选矩形”。
+                # 它只是候选里面积最大，不一定最终通过筛选。
+                preview_info = analyze_rect(best_preview)
+                # 取出排序后的角点，用来画当前候选的红框。
+                candidate_corners = preview_info["corners"]
 
-            #     #建议先画成红色 避免闪烁
-            #     draw_rect_outline(img, candidate_corners, BAD_COLOR)
+                #建议先画成红色 避免闪烁
+                draw_rect_outline(img, candidate_corners, BAD_COLOR)
+
+                if frame_count % DEBUG_PRINT_INTERVAL == 0:
+                    print(
+                        # raw 表示原始角点顺序。
+                        # sorted 表示排序后的角点顺序。
+                        # valid 表示这个候选矩形最终是否通过筛选。
+                        "preview raw=%s sorted=%s valid=%s" % (
+                            format_corners_for_print(preview_info["raw_corners"]),
+                            format_corners_for_print(preview_info["corners"]),
+                            preview_info["valid"],
+                        )
+                    )
 
             if best_valid_info is not None:
+                # 走到这里，说明找到了真正通过筛选的矩形。
                 rect_flag = 1
                 best_area = best_valid_info["area"]
                 err1 = best_valid_info["err1"]
                 err2 = best_valid_info["err2"]
+                # 把这次有效矩形的角点存下来，后面画绿框和算中心都用它。
                 last_valid_corners = best_valid_info["corners"]
+
+                if frame_count % DEBUG_PRINT_INTERVAL == 0:
+                    print(
+                        # valid 行只打印“真正通过筛选”的矩形。
+                        # 额外打印 ratio 和 area，方便你判断是不是比例或面积条件导致闪烁。
+                        "valid  raw=%s sorted=%s ratio=%.2f area=%d" % (
+                            format_corners_for_print(best_valid_info["raw_corners"]),
+                            format_corners_for_print(best_valid_info["corners"]),
+                            best_valid_info["ratio"],
+                            best_valid_info["area"],
+                        )
+                    )
 
             if rect_flag == 1 and last_valid_corners is not None:
                 draw_rect_outline(img, last_valid_corners, GOOD_COLOR)               
